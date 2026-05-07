@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>voice-cut-pipeline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+    .container { max-width: 880px; margin: 0 auto; }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: #f8fafc;
+    }
+    .subtitle { font-size: 13px; color: #64748b; margin-top: 4px; margin-bottom: 32px; }
+
+    /* Config block */
+    .config {
+      background: #161b27;
+      border: 1px solid #1e2433;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+    }
+    .config-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .config-row:last-child { margin-bottom: 0; }
+    .config-row label {
+      flex-shrink: 0;
+      font-size: 13px;
+      color: #94a3b8;
+      width: 86px;
+    }
+    .config-row input {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid #1e2433;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: "SF Mono", monospace;
+    }
+    .config-row input:focus { outline: none; border-color: #6366f1; }
+
+    /* Step cards */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .step-card {
+      background: #161b27;
+      border: 1px solid #1e2433;
+      border-radius: 12px;
+      padding: 18px 20px;
+      transition: border-color 0.15s;
+    }
+    .step-card.done    { border-color: #065f46; }
+    .step-card.error   { border-color: #7f1d1d; }
+    .step-card.running { border-color: #6366f1; }
+
+    .step-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #1e2433;
+      color: #94a3b8;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-card.done    .step-num { background: #065f46; color: #6ee7b7; }
+    .step-card.error   .step-num { background: #7f1d1d; color: #fca5a5; }
+    .step-card.running .step-num { background: #4f46e5; color: #fff; }
+
+    .step-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e2e8f0;
+      flex: 1;
+    }
+    .step-desc { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+    .step-paths {
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      gap: 6px 10px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .step-paths label { color: #475569; }
+    .step-paths .path-val {
+      color: #cbd5e1;
+      font-family: "SF Mono", monospace;
+      font-size: 11px;
+      word-break: break-all;
+    }
+
+    .step-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+    .btn-run {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 7px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-run:hover:not(:disabled) { background: #6366f1; }
+    .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #334155;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .step-card.running .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .step-stats {
+      font-size: 12px;
+      color: #94a3b8;
+      flex: 1;
+      text-align: right;
+    }
+    .stat-ok    { color: #6ee7b7; }
+    .stat-error { color: #fca5a5; }
+
+    .step-errors {
+      margin-top: 10px;
+      border-top: 1px solid #1e2433;
+      padding-top: 10px;
+    }
+    .step-errors summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: #fca5a5;
+      list-style: none;
+    }
+    .step-errors summary::before {
+      content: "▶ ";
+      font-size: 9px;
+    }
+    .step-errors[open] summary::before { content: "▼ "; }
+    .step-errors ul {
+      margin-top: 8px;
+      padding-left: 16px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: "SF Mono", monospace;
+      color: #94a3b8;
+    }
+    .step-errors li { margin: 3px 0; word-break: break-all; }
+
+    .global-error {
+      display: none;
+      background: #450a0a;
+      border: 1px solid #7f1d1d;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #fca5a5;
+      margin-bottom: 16px;
+    }
+    .global-error.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>voice-cut-pipeline</h1>
+    <p class="subtitle">满帮电话录音清洗流水线 · 4 步生成可用于音色克隆的干净片段</p>
+
+    <div class="global-error" id="globalError"></div>
+
+    <div class="config">
+      <div class="config-row">
+        <label>工作目录</label>
+        <input id="workDir" placeholder="/tmp/vcp-test  (必须含 'temp')" />
+      </div>
+      <div class="config-row">
+        <label>源文件夹</label>
+        <input id="srcDir" placeholder="/Users/.../20260111" />
+      </div>
+    </div>
+
+    <div class="steps" id="steps"></div>
+  </div>
+
+  <script>
+    const STEPS = [
+      { n: 1, title: "按货主 ID 分类",   desc: "解析文件名 → 拷贝到 temp1/{shipper_id}/" },
+      { n: 2, title: "提取货主声道",     desc: "根据声道字段输出单声道 WAV → temp2/" },
+      { n: 3, title: "按气口切分",       desc: "按 0.3s 静音切分成多段，0.05s padding → temp3/" },
+      { n: 4, title: "时长过滤",         desc: "≥ 1s 的片段保留 → temp4/（可用于音色克隆）" },
+    ];
+
+    const stepsEl = document.getElementById('steps');
+    const workDirEl = document.getElementById('workDir');
+    const srcDirEl = document.getElementById('srcDir');
+    const globalError = document.getElementById('globalError');
+
+    // 渲染步骤卡片
+    STEPS.forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'step-card';
+      card.id = `step${s.n}`;
+      card.innerHTML = `
+        <div class="step-head">
+          <div class="step-num">${s.n}</div>
+          <div style="flex:1">
+            <div class="step-title">${s.title}</div>
+            <div class="step-desc">${s.desc}</div>
+          </div>
+        </div>
+        <div class="step-paths">
+          <label>输入</label><span class="path-val" id="src${s.n}">-</span>
+          <label>输出</label><span class="path-val" id="dst${s.n}">-</span>
+        </div>
+        <div class="step-actions">
+          <button class="btn-run" id="btn${s.n}" onclick="runStep(${s.n})">运行</button>
+          <div class="spinner"></div>
+          <div class="step-stats" id="stats${s.n}">待运行</div>
+        </div>
+      `;
+      stepsEl.appendChild(card);
+    });
+
+    // 自动填充路径
+    function syncPaths() {
+      const work = workDirEl.value.trim();
+      const src = srcDirEl.value.trim();
+      const inputs = [src, work + '/temp1', work + '/temp2', work + '/temp3'];
+      const outputs = [work + '/temp1', work + '/temp2', work + '/temp3', work + '/temp4'];
+      for (let i = 1; i <= 4; i++) {
+        document.getElementById(`src${i}`).textContent = inputs[i-1] || '-';
+        document.getElementById(`dst${i}`).textContent = outputs[i-1] || '-';
+      }
+    }
+    workDirEl.addEventListener('input', syncPaths);
+    srcDirEl.addEventListener('input', syncPaths);
+
+    // 从 localStorage 恢复
+    workDirEl.value = localStorage.getItem('vcp_work_dir') || '';
+    srcDirEl.value  = localStorage.getItem('vcp_src_dir')  || '';
+    syncPaths();
+    workDirEl.addEventListener('change', () => localStorage.setItem('vcp_work_dir', workDirEl.value));
+    srcDirEl.addEventListener('change',  () => localStorage.setItem('vcp_src_dir',  srcDirEl.value));
+
+    function showError(msg) {
+      globalError.textContent = msg;
+      globalError.classList.add('show');
+    }
+    function hideError() { globalError.classList.remove('show'); }
+
+    async function runStep(n) {
+      hideError();
+      const work = workDirEl.value.trim();
+      const src = srcDirEl.value.trim();
+      if (!work) return showError('请先填写工作目录');
+      if (n === 1 && !src) return showError('请先填写源文件夹');
+
+      // 级联清空提示
+      const downstream = [];
+      for (let i = n + 1; i <= 4; i++) downstream.push(`temp${i}`);
+      if (downstream.length) {
+        if (!confirm(`运行 Step ${n} 将清空 temp${n}` + (downstream.length ? ' 以及下游 ' + downstream.join('、') : '') + '。继续？')) {
+          return;
+        }
+      }
+
+      const card = document.getElementById(`step${n}`);
+      const btn = document.getElementById(`btn${n}`);
+      const stats = document.getElementById(`stats${n}`);
+      card.className = 'step-card running';
+      btn.disabled = true;
+      stats.textContent = '运行中...';
+
+      const inputPath = n === 1 ? src : `${work}/temp${n - 1}`;
+      const outputPath = `${work}/temp${n}`;
+
+      try {
+        const resp = await fetch(`/run/step${n}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ src: inputPath, dst: outputPath, work_dir: work }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          card.className = 'step-card error';
+          stats.innerHTML = `<span class="stat-error">${data.detail || '请求失败'}</span>`;
+          return;
+        }
+
+        renderResult(n, data);
+      } catch (e) {
+        card.className = 'step-card error';
+        stats.innerHTML = `<span class="stat-error">网络错误：${e.message}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderResult(n, data) {
+      const card = document.getElementById(`step${n}`);
+      const stats = document.getElementById(`stats${n}`);
+      const cls = data.status === 'ok' ? 'done' : 'error';
+      card.className = `step-card ${cls}`;
+
+      const summary = `输入 ${data.input_count} → 输出 <span class="stat-ok">${data.output_count}</span>`
+        + (data.skipped ? ` · 跳过 ${data.skipped}` : '')
+        + (data.errors.length ? ` · <span class="stat-error">错误 ${data.errors.length}</span>` : '')
+        + ` · ${data.elapsed_ms}ms`;
+      stats.innerHTML = summary;
+
+      // 移除旧的 errors 块
+      const old = card.querySelector('.step-errors');
+      if (old) old.remove();
+
+      if (data.errors.length) {
+        const errEl = document.createElement('details');
+        errEl.className = 'step-errors';
+        errEl.innerHTML = `
+          <summary>查看错误列表（${data.errors.length}）</summary>
+          <ul>${data.errors.map(e => `<li>${e.file}: ${e.reason}</li>`).join('')}</ul>
+        `;
+        card.appendChild(errEl);
+      }
+    }
+  </script>
+</body>
+</html>

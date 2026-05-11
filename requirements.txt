@@ -4,3 +4,5 @@ soundfile
 numpy
 scipy
 python-multipart
+requests
+oss2

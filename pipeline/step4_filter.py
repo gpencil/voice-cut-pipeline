@@ -1,7 +1,7 @@
 """
 Step 4：时长过滤。
-- 时长 ≥ SEGMENT_MIN_DURATION（1.0s）的片段拷贝到 dst
-- < 1s 视为"嗯/哦/好的"，丢弃
+- 时长 ≥ SEGMENT_MIN_DURATION（2.0s）的片段拷贝到 dst
+- < 2s 视为"嗯/哦/好的"，丢弃
 """
 
 from __future__ import annotations

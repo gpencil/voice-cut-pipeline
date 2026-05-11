@@ -1,10 +1,10 @@
 """
-Step 3：按气口切分成多段。
+Step 3：按气口切分成多段，同时过滤短片段。
 - 长停顿（>0.3s）作为切分点
 - 每段首尾保留 0.05s padding
-- 输出：temp3/{shipper_id}/{原文件名}_001.wav, _002.wav, ...
-- 不做时长过滤（留给 Step 4）
-- 爆破声检测：本期不实现，先跑长停顿；阈值参数已留好
+- 时长 < SEGMENT_MIN_DURATION 的段直接丢弃（无需写到磁盘再过滤）
+- 输出：temp3/{shipper_id}/{货主id}_{源序号}_{切段序号}.wav
+- 同时写 manifest.json 延续原始文件名追踪
 """
 
 from __future__ import annotations
@@ -16,10 +16,14 @@ import numpy as np
 
 from .common import (
     BREATH_MIN_DURATION,
+    SEGMENT_MIN_DURATION,
     SEGMENT_PADDING,
     SILENCE_THRESHOLD,
     StepResult,
+    load_manifest,
+    origin_from_manifest,
     read_wav_pcm16,
+    save_manifest,
     write_wav_pcm16,
 )
 
@@ -71,6 +75,8 @@ def run(src: str, dst: str) -> StepResult:
 
     files = sorted([f for f in src_path.rglob("*.wav") if f.is_file()])
     result.input_count = len(files)
+    src_manifests: dict[Path, dict] = {}
+    dst_manifests: dict[str, dict] = {}
 
     for f in files:
         try:
@@ -91,18 +97,38 @@ def run(src: str, dst: str) -> StepResult:
         shipper_dir = f.parent.name
         target_dir = dst_path / shipper_dir
         target_dir.mkdir(parents=True, exist_ok=True)
+        src_manifest = src_manifests.setdefault(f.parent, load_manifest(f.parent))
+        dst_manifest = dst_manifests.setdefault(shipper_dir, load_manifest(target_dir))
+        origin = origin_from_manifest(src_manifest, f.name)
 
         stem = f.stem
-        for idx, (s, e) in enumerate(segments, start=1):
+        min_samples = int(SEGMENT_MIN_DURATION * sr)
+        out_idx = 1
+        kept = 0
+        for s, e in segments:
             ps = max(0, s - padding)
             pe = min(len(data), e + padding)
+            if (pe - ps) < min_samples:   # 用加了 padding 的实际输出长度判断
+                result.skipped += 1
+                continue
+            kept += 1
             seg_audio = data[ps:pe].astype(np.int16)
-            out_path = target_dir / f"{stem}_{idx:03d}.wav"
+            out_path = target_dir / f"{stem}_{out_idx:03d}.wav"
             try:
                 write_wav_pcm16(str(out_path), sr, seg_audio)
+                dst_manifest[out_path.name] = {"source": f.name, "origin": origin}
                 result.output_count += 1
+                out_idx += 1
             except Exception as ex:
-                result.fail(f"{f.name}#{idx}", f"写入失败: {ex}")
+                result.fail(f"{f.name}#{out_idx}", f"写入失败: {ex}")
+
+        if kept == 0:
+            total_s = round(len(data) / sr, 1)
+            longest_s = round(max(e - s for s, e in segments) / sr, 1) if segments else 0
+            result.fail(f.name, f"所有切段均短于 {SEGMENT_MIN_DURATION}s 被丢弃（音频总长 {total_s}s，最长段 {longest_s}s）")
+
+    for shipper_id, manifest in dst_manifests.items():
+        save_manifest(dst_path / shipper_id, manifest)
 
     result.elapsed_ms = int((time.time() - t0) * 1000)
     return result

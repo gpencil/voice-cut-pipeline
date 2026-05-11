@@ -4,6 +4,7 @@ voice-cut-pipeline FastAPI 入口。
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +17,10 @@ from pipeline import (
     step1_classify,
     step2_extract_channel,
     step3_split,
-    step4_filter,
+    step4_quality,
+    step5_asr,
+    step6_clone,
+    step7_delete_voice,
 )
 from pipeline.common import StepResult
 from pipeline.safety import SafetyError, cascade_clear, safe_clear_temp, validate_dst
@@ -28,7 +32,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 class RunReq(BaseModel):
     src: str
     dst: str
-    work_dir: Optional[str] = None  # 用于级联清理下游 tempN（可选）
+    work_dir: Optional[str] = None   # 用于级联清理下游 tempN（可选）
+    api_key: Optional[str] = None    # Step 6 音色克隆 API 密钥
+
+
+class DeleteVoiceReq(BaseModel):
+    voice_id: str
+    api_key: str
 
 
 @app.get("/")
@@ -78,4 +88,55 @@ def run_step3(req: RunReq):
 
 @app.post("/run/step4")
 def run_step4(req: RunReq):
-    return _run_step(4, step4_filter, req)
+    return _run_step(4, step4_quality, req)
+
+
+@app.post("/run/step5")
+def run_step5(req: RunReq):
+    return _run_step(5, step5_asr, req)
+
+
+@app.post("/run/step6")
+def run_step6(req: RunReq):
+    try:
+        validate_dst(req.dst, req.src)
+    except SafetyError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    src_path = Path(req.src)
+    if not src_path.exists() or not src_path.is_dir():
+        return JSONResponse(StepResult(step=6).to_dict())
+
+    if req.api_key:
+        _delete_existing_step6_voices(Path(req.dst), req.api_key)
+
+    safe_clear_temp(req.dst)
+
+    if req.work_dir:
+        try:
+            cascade_clear(req.work_dir, from_step=7)
+        except SafetyError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    result = step6_clone.run(req.src, req.dst, api_key=req.api_key or "")
+    return JSONResponse(result.to_dict())
+
+
+@app.post("/run/step7")
+def run_step7(req: DeleteVoiceReq):
+    result = step7_delete_voice.run(req.voice_id, api_key=req.api_key)
+    return JSONResponse(result.to_dict())
+
+
+def _delete_existing_step6_voices(temp6_dir: Path, api_key: str):
+    """重跑 Step 6 前，删除上一次 report.json 中保留的 Round2 voice_id。"""
+    if not temp6_dir.exists():
+        return
+    for report_path in temp6_dir.rglob("report.json"):
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        voice_id = str(report.get("voice_id") or "").strip()
+        if voice_id:
+            step7_delete_voice.run(voice_id, api_key=api_key)

@@ -203,13 +203,14 @@
 <body>
   <div class="container">
     <h1>voice-cut-pipeline</h1>
-    <p class="subtitle">满帮电话录音清洗流水线 · 4 步生成可用于音色克隆的干净片段</p>
+    <p class="subtitle">满帮电话录音清洗流水线 · 7 步生成、验证并管理音色克隆效果（Step 3 含时长过滤）</p>
 
     <div class="global-error" id="globalError"></div>
 
     <div class="config">
       <div class="config-row">
         <label>工作目录</label>
+<!--        <input id="workDir" placeholder="/tmp/vcp-test  (必须含 'temp')" />-->
         <input id="workDir" placeholder="/tmp/vcp-test  (必须含 'temp')" />
       </div>
       <div class="config-row">
@@ -223,10 +224,13 @@
 
   <script>
     const STEPS = [
-      { n: 1, title: "按货主 ID 分类",   desc: "解析文件名 → 拷贝到 temp1/{shipper_id}/" },
-      { n: 2, title: "提取货主声道",     desc: "根据声道字段输出单声道 WAV → temp2/" },
-      { n: 3, title: "按气口切分",       desc: "按 0.3s 静音切分成多段，0.05s padding → temp3/" },
-      { n: 4, title: "时长过滤",         desc: "≥ 1s 的片段保留 → temp4/（可用于音色克隆）" },
+      { n: 1, key: 'step1', title: "按货主 ID 分类",    desc: "解析文件名 → 拷贝到 temp1/{shipper_id}/" },
+      { n: 2, key: 'step2', title: "提取货主声道",      desc: "根据声道字段输出单声道 WAV → temp2/" },
+      { n: 3, key: 'step3', title: "切分 + 时长过滤",   desc: "按 0.3s 气口切分，丢弃 < 2s 短段 → temp3/" },
+      { n: 4, key: 'step4', title: "音质筛选 + 排名",   desc: "9 条噪声规则过滤 → 评分排名 → rank1_… 保存到 temp4/" },
+      { n: 5, key: 'step5', title: "ASR 内容过滤",     desc: "仅对 rank1 调自建 ASR → 过滤 <5 汉字/重复 → temp5/（含 .txt）" },
+      { n: 6, key: 'step6', title: "两轮音色克隆验证",  desc: "R1 克隆→生成→选优→R2 克隆→生成→评估报告 → temp6/", hasApiKey: true },
+      { n: 7, key: 'step7', title: "删除音色记录",      desc: "根据 voice_id 调用删除接口，不清理任何 temp 目录", hasApiKey: true, hasVoiceId: true, noPaths: true },
     ];
 
     const stepsEl = document.getElementById('steps');
@@ -234,11 +238,23 @@
     const srcDirEl = document.getElementById('srcDir');
     const globalError = document.getElementById('globalError');
 
+    // 每个步骤的输入/输出目录（相对 workDir）
+    function stepDirs(work, src) {
+      return {
+        step1: { input: src,             output: work + '/temp1' },
+        step2: { input: work + '/temp1', output: work + '/temp2' },
+        step3: { input: work + '/temp2', output: work + '/temp3' },
+        step4: { input: work + '/temp3', output: work + '/temp4' },
+        step5: { input: work + '/temp4', output: work + '/temp5' },
+        step6: { input: work + '/temp5', output: work + '/temp6' },
+      };
+    }
+
     // 渲染步骤卡片
     STEPS.forEach(s => {
       const card = document.createElement('div');
       card.className = 'step-card';
-      card.id = `step${s.n}`;
+      card.id = s.key;
       card.innerHTML = `
         <div class="step-head">
           <div class="step-num">${s.n}</div>
@@ -247,14 +263,25 @@
             <div class="step-desc">${s.desc}</div>
           </div>
         </div>
+        ${!s.noPaths ? `
         <div class="step-paths">
-          <label>输入</label><span class="path-val" id="src${s.n}">-</span>
-          <label>输出</label><span class="path-val" id="dst${s.n}">-</span>
-        </div>
+          <label>输入</label><span class="path-val" id="src_${s.key}">-</span>
+          <label>输出</label><span class="path-val" id="dst_${s.key}">-</span>
+        </div>` : ''}
+        ${s.hasVoiceId ? `
+        <div class="config-row" style="margin-bottom:12px">
+          <label style="width:72px">Voice ID</label>
+          <input id="voiceId_${s.key}" placeholder="manbang_..." style="flex:1" />
+        </div>` : ''}
+        ${s.hasApiKey ? `
+        <div class="config-row" style="margin-bottom:12px">
+          <label style="width:72px">API Key</label>
+          <input id="apiKey_${s.key}" type="text" placeholder="VUILABS_API_KEY（必填）" style="flex:1" />
+        </div>` : ''}
         <div class="step-actions">
-          <button class="btn-run" id="btn${s.n}" onclick="runStep(${s.n})">运行</button>
+          <button class="btn-run" id="btn_${s.key}" onclick="runStep('${s.key}')">运行</button>
           <div class="spinner"></div>
-          <div class="step-stats" id="stats${s.n}">待运行</div>
+          <div class="step-stats" id="stats_${s.key}">待运行</div>
         </div>
       `;
       stepsEl.appendChild(card);
@@ -264,12 +291,13 @@
     function syncPaths() {
       const work = workDirEl.value.trim();
       const src = srcDirEl.value.trim();
-      const inputs = [src, work + '/temp1', work + '/temp2', work + '/temp3'];
-      const outputs = [work + '/temp1', work + '/temp2', work + '/temp3', work + '/temp4'];
-      for (let i = 1; i <= 4; i++) {
-        document.getElementById(`src${i}`).textContent = inputs[i-1] || '-';
-        document.getElementById(`dst${i}`).textContent = outputs[i-1] || '-';
-      }
+      const dirs = stepDirs(work, src);
+      STEPS.forEach(s => {
+        const srcEl = document.getElementById(`src_${s.key}`);
+        const dstEl = document.getElementById(`dst_${s.key}`);
+        if (srcEl) srcEl.textContent = dirs[s.key]?.input || '-';
+        if (dstEl) dstEl.textContent = dirs[s.key]?.output || '-';
+      });
     }
     workDirEl.addEventListener('input', syncPaths);
     srcDirEl.addEventListener('input', syncPaths);
@@ -287,37 +315,56 @@
     }
     function hideError() { globalError.classList.remove('show'); }
 
-    async function runStep(n) {
+    // 每个步骤重跑时需要清空的下游目录（用于 confirm 提示）
+    const DOWNSTREAM_DIRS = {
+      step1: ['temp1', 'temp2', 'temp3', 'temp4', 'temp5', 'temp6'],
+      step2: ['temp2', 'temp3', 'temp4', 'temp5', 'temp6'],
+      step3: ['temp3', 'temp4', 'temp5', 'temp6'],
+      step4: ['temp4', 'temp5', 'temp6'],
+      step5: ['temp5', 'temp6'],
+      step6: ['temp6'],
+      step7: [],
+    };
+
+    async function runStep(key) {
       hideError();
       const work = workDirEl.value.trim();
       const src = srcDirEl.value.trim();
-      if (!work) return showError('请先填写工作目录');
-      if (n === 1 && !src) return showError('请先填写源文件夹');
+      if (key !== 'step7' && !work) return showError('请先填写工作目录');
+      if (key === 'step1' && !src) return showError('请先填写源文件夹');
 
-      // 级联清空提示
-      const downstream = [];
-      for (let i = n + 1; i <= 4; i++) downstream.push(`temp${i}`);
-      if (downstream.length) {
-        if (!confirm(`运行 Step ${n} 将清空 temp${n}` + (downstream.length ? ' 以及下游 ' + downstream.join('、') : '') + '。继续？')) {
-          return;
-        }
+      const dirs = stepDirs(work, src);
+      const { input: inputPath, output: outputPath } = dirs[key] || {};
+      const downstream = DOWNSTREAM_DIRS[key] || [];
+      const stepMeta = STEPS.find(s => s.key === key);
+      const apiKeyEl = document.getElementById(`apiKey_${key}`);
+      const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+      if (stepMeta?.hasApiKey && !apiKey) return showError('请填写 API Key');
+      const voiceIdEl = document.getElementById(`voiceId_${key}`);
+      const voiceId = voiceIdEl ? voiceIdEl.value.trim() : '';
+      if (stepMeta?.hasVoiceId && !voiceId) return showError('请填写 Voice ID');
+
+      const confirmText = key === 'step7'
+        ? `确认删除音色 ${voiceId}？`
+        : `运行 Step ${stepMeta.n} 将清空 ${downstream.join('、')}。继续？`;
+      if (!confirm(confirmText)) {
+        return;
       }
 
-      const card = document.getElementById(`step${n}`);
-      const btn = document.getElementById(`btn${n}`);
-      const stats = document.getElementById(`stats${n}`);
+      const card = document.getElementById(key);
+      const btn = document.getElementById(`btn_${key}`);
+      const stats = document.getElementById(`stats_${key}`);
       card.className = 'step-card running';
       btn.disabled = true;
       stats.textContent = '运行中...';
 
-      const inputPath = n === 1 ? src : `${work}/temp${n - 1}`;
-      const outputPath = `${work}/temp${n}`;
-
       try {
-        const resp = await fetch(`/run/step${n}`, {
+        const resp = await fetch(`/run/${key}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ src: inputPath, dst: outputPath, work_dir: work }),
+          body: JSON.stringify(key === 'step7'
+            ? { voice_id: voiceId, api_key: apiKey }
+            : { src: inputPath, dst: outputPath, work_dir: work, api_key: apiKey || undefined }),
         });
         const data = await resp.json();
 
@@ -327,7 +374,7 @@
           return;
         }
 
-        renderResult(n, data);
+        renderResult(key, data);
       } catch (e) {
         card.className = 'step-card error';
         stats.innerHTML = `<span class="stat-error">网络错误：${e.message}</span>`;
@@ -336,9 +383,9 @@
       }
     }
 
-    function renderResult(n, data) {
-      const card = document.getElementById(`step${n}`);
-      const stats = document.getElementById(`stats${n}`);
+    function renderResult(key, data) {
+      const card = document.getElementById(key);
+      const stats = document.getElementById(`stats_${key}`);
       const cls = data.status === 'ok' ? 'done' : 'error';
       card.className = `step-card ${cls}`;
 
@@ -355,8 +402,9 @@
       if (data.errors.length) {
         const errEl = document.createElement('details');
         errEl.className = 'step-errors';
+        const label = (data.step >= 4) ? '过滤/错误详情' : '查看错误列表';
         errEl.innerHTML = `
-          <summary>查看错误列表（${data.errors.length}）</summary>
+          <summary>${label}（${data.errors.length}）</summary>
           <ul>${data.errors.map(e => `<li>${e.file}: ${e.reason}</li>`).join('')}</ul>
         `;
         card.appendChild(errEl);

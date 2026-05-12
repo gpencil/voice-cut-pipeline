@@ -6,13 +6,13 @@
 
 | Step | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| 1 | 源文件夹 | `temp1/{shipper_id}/*.wav` | 按货主 ID 分类（拷贝） |
+| 1 | 源文件夹 | `temp1/{shipper_id}/*.wav` | 查 MySQL 去重，已有音色 ID 的货主直接跳过；其余按货主 ID 分类（拷贝） |
 | 2 | `temp1/` | `temp2/{shipper_id}/{shipper_id}_001.wav` | 按声道提取货主单声道，写 `manifest.json` |
 | 3 | `temp2/` | `temp3/{shipper_id}/{shipper_id}_001_001.wav …` | 按 0.3s 气口切分 + 丢弃 < 2s 短段 |
 | 4 | `temp3/` | `temp4/{shipper_id}/rank{N}_*.wav` | 裁掉开头空白/短语气词 → 9 条音质规则过滤 → 评分排名，默认保留前 5 |
 | 5 | `temp4/` | `temp5/{shipper_id}/rank1_*.wav + .txt` | 对 rank1 调自建 ASR，过滤内容不达标片段 |
 | 6 | `temp5/` | `temp6/{shipper_id}/r{1,2}_gen{1,2}.wav` | 两轮音色克隆验证 |
-| 7 | `voice_id` | 删除远端音色记录 | 根据 voice_id 调删除接口，不清理 temp |
+| 7 | `voice_id` | 删除远端音色记录 + MySQL 去重记录 | 根据 voice_id 调删除接口，不清理 temp |
 
 `temp2` 之后每个货主目录都会写 `manifest.json`，用短文件名保留原始录音追踪。
 
@@ -37,6 +37,35 @@ uvicorn app:app --port 8801 --reload
 ```
 
 打开 http://localhost:8801
+
+## MySQL 去重表
+
+Step 1 会查询 `tts_dev.manbang`，如果 `m_id={货主id}` 已存在非空 `voice_id`，该货主音频会在 Step 1 直接跳过，不进入后续拆分。
+
+Step 6 成功生成最终音色后，会写入/更新同一张表：
+
+```sql
+INSERT INTO manbang (m_id, voice_id) VALUES (..., ...)
+ON DUPLICATE KEY UPDATE voice_id=VALUES(voice_id);
+```
+
+Step 7 删除远端音色成功后，会同步执行：
+
+```sql
+DELETE FROM manbang WHERE voice_id = ...;
+```
+
+默认连接串：
+
+```bash
+root:12345678@tcp(localhost:3306)/tts_dev?charset=utf8mb4&parseTime=true&loc=Local
+```
+
+如需覆盖：
+
+```bash
+export MANBANG_MYSQL_DSN='root:12345678@tcp(localhost:3306)/tts_dev?charset=utf8mb4&parseTime=true&loc=Local'
+```
 
 ## 使用
 

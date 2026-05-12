@@ -5,6 +5,7 @@ voice-cut-pipeline FastAPI 入口。
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +48,7 @@ def index():
 
 
 def _run_step(step_no: int, runner, req: RunReq):
+    t0 = time.time()
     try:
         validate_dst(req.dst, req.src)
     except SafetyError as e:
@@ -57,17 +59,21 @@ def _run_step(step_no: int, runner, req: RunReq):
     if not src_path.exists() or not src_path.is_dir():
         return JSONResponse(StepResult(step=step_no).to_dict())
 
-    # 重跑：清空当前 step 输出目录
-    safe_clear_temp(req.dst)
+    try:
+        # 重跑：清空当前 step 输出目录
+        safe_clear_temp(req.dst)
 
-    # 级联清空下游 temp（可选）
-    if req.work_dir:
-        try:
+        # 级联清空下游 temp（可选）
+        if req.work_dir:
             cascade_clear(req.work_dir, from_step=step_no + 1)
-        except SafetyError as e:
-            raise HTTPException(status_code=422, detail=str(e))
 
-    result = runner.run(req.src, req.dst)
+        result = runner.run(req.src, req.dst)
+    except SafetyError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        result = StepResult(step=step_no)
+        result.fail(f"step{step_no}", f"执行失败: {type(e).__name__}: {e}")
+        result.elapsed_ms = int((time.time() - t0) * 1000)
     return JSONResponse(result.to_dict())
 
 

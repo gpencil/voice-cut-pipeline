@@ -9,7 +9,8 @@ class DeleteVoiceTest(unittest.TestCase):
         resp = Mock()
         resp.raise_for_status.return_value = None
 
-        with patch("pipeline.step7_delete_voice.requests.delete", return_value=resp) as delete:
+        with patch("pipeline.step7_delete_voice.requests.delete", return_value=resp) as delete, \
+             patch("pipeline.step7_delete_voice.delete_voice_record") as delete_record:
             result = step7_delete_voice.run("manbang_123", api_key="secret")
 
         self.assertEqual(result.status, "ok")
@@ -19,6 +20,7 @@ class DeleteVoiceTest(unittest.TestCase):
         kwargs = delete.call_args.kwargs
         self.assertTrue(url.endswith("/v1/voice/manbang_123"))
         self.assertEqual(kwargs["headers"]["X-API-Key"], "secret")
+        delete_record.assert_called_once_with("manbang_123")
 
     def test_delete_voice_requires_voice_id(self):
         result = step7_delete_voice.run("", api_key="secret")

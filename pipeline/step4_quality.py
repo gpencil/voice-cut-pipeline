@@ -73,7 +73,17 @@ _TRAILING_ISOLATED_GAP_MIN_S = 0.08
 # 底层信号工具
 # ────────────────────────────────────────────────────────────
 
+def _as_mono(data: np.ndarray) -> np.ndarray:
+    """Step 4 指标统一按单声道计算，避免双声道 reshape 失败。"""
+    if data.ndim == 1:
+        return data.astype(np.int16, copy=False)
+    if data.ndim == 2:
+        return np.mean(data.astype(np.float32), axis=1).astype(np.int16)
+    return data.reshape(-1).astype(np.int16)
+
+
 def _frame_rms(data: np.ndarray, samplerate: int) -> np.ndarray:
+    data = _as_mono(data)
     frame_size = int(samplerate * _FRAME_MS / 1000)
     n = len(data) // frame_size
     if n < 5:
@@ -93,6 +103,7 @@ def _estimate_snr(rms: np.ndarray) -> float:
 
 
 def _speech_ratio(data: np.ndarray) -> float:
+    data = _as_mono(data)
     return float(np.mean(np.abs(data) > SILENCE_THRESHOLD))
 
 
@@ -114,6 +125,7 @@ def _tail_ratio(rms: np.ndarray) -> float:
 
 
 def _noisy_voiced_ratio(data: np.ndarray, samplerate: int) -> float:
+    data = _as_mono(data)
     rms = _frame_rms(data, samplerate)
     if len(rms) == 0:
         return 0.0
@@ -134,6 +146,7 @@ def _noisy_voiced_ratio(data: np.ndarray, samplerate: int) -> float:
 
 def _hiss_frame_flags(data: np.ndarray, samplerate: int) -> tuple[np.ndarray, np.ndarray, int]:
     """返回每个 50ms 帧是否为高频擦噪候选。"""
+    data = _as_mono(data)
     rms = _frame_rms(data, samplerate)
     if len(rms) == 0:
         return np.array([], dtype=bool), rms, 0
@@ -206,6 +219,7 @@ def _voiced_runs(voiced: np.ndarray) -> list[tuple[int, int]]:
 
 def _trim_leading_start(data: np.ndarray, samplerate: int) -> tuple[np.ndarray, float]:
     """只裁开头空白或很短的开头语气词（嗯/哦/好），不处理中间和结尾。"""
+    data = _as_mono(data)
     rms = _frame_rms(data, samplerate)
     if len(rms) == 0:
         return data, 0.0
@@ -241,6 +255,7 @@ def _trim_leading_start(data: np.ndarray, samplerate: int) -> tuple[np.ndarray, 
 
 def _trim_trailing_residue(data: np.ndarray, samplerate: int) -> tuple[np.ndarray, float]:
     """只裁末尾残留：连续低能量尾巴，或停顿后的孤立短尾段。"""
+    data = _as_mono(data)
     rms = _frame_rms(data, samplerate)
     if len(rms) == 0:
         return data, 0.0
@@ -310,6 +325,7 @@ def _speech_burst_stats(data: np.ndarray, samplerate: int) -> tuple[float, float
 
 
 def _low_freq_energy_ratio(data: np.ndarray, samplerate: int, cutoff: int = 300) -> float:
+    data = _as_mono(data)
     mag = np.abs(np.fft.rfft(data.astype(np.float64)))
     freqs = np.fft.rfftfreq(len(data), 1 / samplerate)
     lo = float((mag[freqs < cutoff] ** 2).sum())

@@ -10,6 +10,7 @@ import time
 import requests
 
 from .common import StepResult
+from .manbang_db import delete_voice_record
 
 _API_BASE = os.environ.get("VUILABS_API_BASE", "https://api.vuilabs.cn")
 _TIMEOUT = 30
@@ -40,6 +41,13 @@ def run(voice_id: str, api_key: str = "") -> StepResult:
         result.output_count = 1
     except Exception as e:
         result.fail(voice_id, f"删除音色失败: {e}")
+        result.elapsed_ms = int((time.time() - t0) * 1000)
+        return result
+
+    try:
+        delete_voice_record(voice_id)
+    except Exception as e:
+        result.fail(voice_id, f"删除本地去重记录失败: {e}")
 
     result.elapsed_ms = int((time.time() - t0) * 1000)
     return result

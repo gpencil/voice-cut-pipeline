@@ -6,3 +6,4 @@ scipy
 python-multipart
 requests
 oss2
+PyMySQL

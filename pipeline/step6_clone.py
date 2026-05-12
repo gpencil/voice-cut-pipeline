@@ -50,6 +50,7 @@ from .step4_quality import (
     _speech_burst_stats,
     _vol_consistency_score,
 )
+from .manbang_db import upsert_voice_id
 
 # ── 配置 ────────────────────────────────────────────────────
 _API_BASE  = os.environ.get("VUILABS_API_BASE", "https://api.vuilabs.cn")
@@ -275,11 +276,11 @@ def run(src: str, dst: str, api_key: str = "") -> StepResult:
     dst_p.mkdir(parents=True, exist_ok=True)
     manifest_path = dst_p / "oss_manifest.json"
 
-    # 枚举 temp5 中每个货主的 rank1 文件
-    rank1_files = sorted(src_p.rglob("rank1_*.wav"))
-    result.input_count = len(rank1_files)
+    # 枚举 temp5 中每个货主通过 ASR 的 WAV；不强依赖 rank1_ 前缀。
+    input_files = sorted(src_p.rglob("*.wav"))
+    result.input_count = len(input_files)
 
-    for wav_path in rank1_files:
+    for wav_path in input_files:
         shipper_id = wav_path.parent.name
         txt_path   = wav_path.with_suffix(".txt")
         out_dir    = dst_p / shipper_id
@@ -381,6 +382,7 @@ def run(src: str, dst: str, api_key: str = "") -> StepResult:
             (out_dir / "report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            upsert_voice_id(shipper_id, voice_r2)
             result.output_count += 1
 
         except Exception as e:

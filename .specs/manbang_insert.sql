@@ -37,3 +37,4 @@ INSERT INTO `tts_dev`.`manbang` (`id`, `m_id`, `voice_id`) VALUES (25, '40000000
 INSERT INTO `tts_dev`.`manbang` (`id`, `m_id`, `voice_id`) VALUES (29, '4000000020563728489', 'manbang_1778589042816');
 INSERT INTO `tts_dev`.`manbang` (`id`, `m_id`, `voice_id`) VALUES (30, '4000000069968675018', 'manbang_1778589049127');
 INSERT INTO `tts_dev`.`manbang` (`id`, `m_id`, `voice_id`) VALUES (32, '96315273746802420', 'manbang_1778589054726');
+INSERT INTO `tts_dev`.`manbang` (`id`, `m_id`, `voice_id`) VALUES (33, '4000000035875721646', 'manbang_1778591289098');

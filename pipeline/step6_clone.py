@@ -35,6 +35,7 @@ import json
 import os
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -56,7 +57,9 @@ from .manbang_db import upsert_voice_id
 _API_BASE  = os.environ.get("VUILABS_API_BASE", "https://api.vuilabs.cn")
 _OSS_EP    = os.environ.get("OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
 _OSS_BKT   = os.environ.get("OSS_BUCKET", "lunalab-res")
-_OSS_DIR   = "ttsVoiceV1"
+# 上传到 lunalab-res 的临时前缀；bucket 上配了 `temp_delete/` 前缀 7 天 lifecycle 自动清理。
+# 详见 .specs/0514_step6_OSS临时路径改造.md 与 yusheng/api-gateway/AGENTS.md 公开 bucket 约定。
+_OSS_DIR   = "temp_delete/voice-cut-pipeline"
 _OSS_AK    = os.environ.get("AliyunAccessKeyID", "")
 _OSS_SK    = os.environ.get("AliyunAccessKeySecret", "")
 
@@ -76,10 +79,16 @@ def _oss_bucket() -> oss2.Bucket:
     return oss2.Bucket(auth, _OSS_EP, _OSS_BKT)
 
 
+def _build_temp_key(suffix: str = ".wav") -> str:
+    """生成 temp_delete/voice-cut-pipeline/{YYYYMMDD}/{毫秒}_{随机}.{后缀} 路径。"""
+    date_dir = datetime.now().strftime("%Y%m%d")
+    unique = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{suffix}"
+    return f"{_OSS_DIR}/{date_dir}/{unique}"
+
+
 def _upload_wav(wav_path: str) -> str:
     """上传 WAV 到 OSS，返回 object_key。"""
-    unique = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}.wav"
-    key = f"{_OSS_DIR}/{unique}"
+    key = _build_temp_key(".wav")
     bkt = _oss_bucket()
     with open(wav_path, "rb") as f:
         bkt.put_object(key, f)
@@ -88,8 +97,7 @@ def _upload_wav(wav_path: str) -> str:
 
 def _upload_bytes(data: bytes, suffix: str = ".wav") -> str:
     """上传内存中的音频 bytes 到 OSS，返回 object_key。"""
-    unique = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{suffix}"
-    key = f"{_OSS_DIR}/{unique}"
+    key = _build_temp_key(suffix)
     _oss_bucket().put_object(key, data)
     return key
 

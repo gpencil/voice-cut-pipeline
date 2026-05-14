@@ -114,7 +114,9 @@
 
 **Round 1（选优）**：
 
-1. 上传 `rank1_*.wav` 到 OSS（`ttsVoiceV1/` 目录）→ 记入 `temp6/oss_manifest.json`
+1. 上传 `rank1_*.wav` 到 OSS（`temp_delete/voice-cut-pipeline/{YYYYMMDD}/` 目录，
+   由 `lunalab-res` 上 `temp_delete/` 前缀 7 天 lifecycle 自动清理；详见
+   `.specs/0514_step6_OSS临时路径改造.md`）→ 记入 `temp6/oss_manifest.json`
 2. `POST /v1/voice/save`（`voice_id=manbang_{ts}_r1`，`ref_audio=OSS URL`，`ref_text=.txt内容`）
 3. 用 Round 1 音色生成两段固定测试音频：
    - 句子 A：`我们明天上午十点在仓库见，你到了给我打电话。`
